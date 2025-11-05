@@ -1,0 +1,67 @@
+# Python artifacts
+__pycache__/
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+.installed.cfg
+*.egg
+pip-wheel-metadata/
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.pytest_cache/
+nosetests.xml
+coverage.xml
+
+# Type checking caches
+.mypy_cache/
+.pyre/
+.pytype/
+
+# Virtual environments
+.env/
+venv/
+ENV/
+env/
+env.bak/
+venv.bak/
+.venv/
+__pypackages__/
+
+# Environment files
+.env
+.env.*
+
+# Jupyter
+.ipynb_checkpoints
+
+# IDEs / editors
+.vscode/
+# Uncomment to keep workspace settings tracked:
+# !.vscode/settings.json
+
+# Misc
+.python-version
+.pytest_cache/
+*.manifest
+*.spec
+*.cover
+.hypothesis/
+*.mo
+*.pot
+*.sqlite3
+.idea/
