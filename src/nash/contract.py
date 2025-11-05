@@ -752,7 +752,7 @@ def best_response_map(static_params, dynamic_params):
         static_params, dynamic_params, indices, nash_objective
     )
 
-def loss_fn(static_params, dynamic_params):
+def loss_fn(static_params, dynamic_params, prices_i):
     """
     Fixed-point residual loss for Nash equilibrium.
     
@@ -779,13 +779,13 @@ def loss_fn(static_params, dynamic_params):
     Minimizing this loss function finds the Nash equilibrium.
     Gradient descent on L(p) converges to a fixed point of BR(·).
     """
-    p = dynamic_params["prices_i"]
-    r = best_response_map(static_params, dynamic_params) - p
+    dynamic_params["prices_i"] = prices_i
+    r = best_response_map(static_params, dynamic_params) - prices_i
     return jnp.sum(r ** 2)
 
 # Precompile loss and gradient for efficiency
 loss_and_grad_fn = jit(
-    value_and_grad(loss_fn, argnums=1), 
+    value_and_grad(loss_fn, argnums=2),
     static_argnames=("static_params",)
 )
 
@@ -862,15 +862,9 @@ def find_equilibrium(static_params, dynamic_params):
         task = progress.add_task("solve", total=max_iter, loss=float("inf"))
 
         for t in range(max_iter):
-            # Update prices in dynamic_params
-            dynamic_params = {**dynamic_params, "prices_i": p}
-            
             # Compute loss and gradient
-            loss, grad = loss_and_grad_fn(static_params, dynamic_params)
-            
-            # Extract gradient w.r.t. prices_i
-            grad_p = grad["prices_i"]
-            
+            loss, grad_p = loss_and_grad_fn(static_params, dynamic_params, p)
+                        
             # Update prices using Adam
             updates, opt_state = opt.update(grad_p, opt_state)
             p = optax.apply_updates(p, updates)

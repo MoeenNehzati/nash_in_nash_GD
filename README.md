@@ -82,22 +82,38 @@ The model has four hierarchical levels:
 
 ### `nash.initializer`
 
-Parameter initialization module:
+Parameter initialization module for testing scenarios:
 
 **Functions:**
 - `init_simple_params(mode)` - Initializes a simple 2-product model for testing
   - Modes: `"symmetric"`, `"asymmetric"`, `"high_loyalty"`, `"high_elasticity"`
   - Returns: `(static_params, dynamic_params)` tuple
 
-- `init_grennan_params(seed)` - Initializes full 8-product Grennan-style model
-  - 6 BMS (Bare Metal Stent) products
-  - 2 DES (Drug-Eluting Stent) products
-  - Calibrated to empirical parameters from Grennan (2013)
-  - Returns: `(static_params, dynamic_params)` tuple
-
 **Parameter Structure:**
-- `static_params`: Fixed model structure (n_stents, n_types, n_loyalty, etc.)
+- `static_params`: Fixed model structure (n_stents, n_grid, optimization settings)
 - `dynamic_params`: Economic parameters (prices, costs, revenues, utilities, etc.)
+
+### `grennen_specification`
+
+Full 8-product Grennan model specification:
+
+**Model Structure:**
+- 6 BMS (Bare Metal Stent) products
+- 2 DES (Drug-Eluting Stent) products
+- Calibrated to empirical parameters from Grennan (2013)
+
+**Components:**
+- Optimization parameters (learning rate, convergence tolerance, max iterations)
+- Dimensionality and type indicators
+- Preference and nesting parameters (σ, λ values for nested logit)
+- Economic primitives (revenues, marginal costs, bargaining parameters)
+- Loyalty structure (loyalty weights φ_l, intensity λ_i)
+- Price domain (bounds, grids, initial prices)
+- Nest-scaling denominators for demand calculations
+
+**Exports:**
+- `static_params`: FrozenDict with model dimensions and optimization settings
+- `dynamic_params`: Dict with all economic and structural parameters
 
 ## Running the Main Script
 
@@ -108,7 +124,7 @@ python src/grennen.py
 ```
 
 This script:
-1. Initializes Grennan model parameters
+1. Imports Grennan model parameters from `grennen_specification.py`
 2. Finds Nash bargaining equilibrium prices
 3. Computes best response prices
 4. Prints equilibrium results and convergence information
@@ -133,17 +149,18 @@ Test dependencies:
 fornow/
 ├── src/
 │   ├── __init__.py
-│   ├── grennen.py          # Main simulation script
+│   ├── grennen.py                # Main simulation script
+│   ├── grennen_specification.py  # Grennan model parameters (8 products)
 │   └── nash/
 │       ├── __init__.py
-│       ├── contract.py     # Nested logit & Nash bargaining
-│       └── initializer.py  # Parameter initialization
+│       ├── contract.py           # Nested logit & Nash bargaining
+│       └── initializer.py        # Test parameter initialization
 ├── tests/
-│   ├── test_br.py          # Best response tests
-│   └── test_contract.py    # Demand & bargaining tests
-├── setup.py                # Package configuration
-├── pytest.ini              # Pytest configuration
-└── README.md               # This file
+│   ├── test_br.py                # Best response tests
+│   └── test_contract.py          # Demand & bargaining tests
+├── setup.py                      # Package configuration
+├── pytest.ini                    # Pytest configuration
+└── README.md                     # This file
 ```
 
 ## References

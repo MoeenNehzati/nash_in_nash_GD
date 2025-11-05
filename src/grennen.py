@@ -1,3 +1,6 @@
+#===============================
+# Setting up JAX environment variables for performance tuning
+#===============================`
 import os
 os.environ["XLA_FLAGS"] = (
     "--xla_cpu_multi_thread_eigen=true "
@@ -13,16 +16,21 @@ os.environ["XLA_FLAGS"] = (
 os.environ["JAX_ENABLE_X64"] = "0"  # float32 mode for speed
 
 
-
-from nash.initializer import init_simple_params, init_grennan_params
-from nash.contract import find_equilibrium, best_response_map, calculate_nash_product
-static_params, dynamic_params = init_grennan_params()
-
-import jax
+#===============================
+# Main script to run the Grennan (2013) stent market equilibrium
+#===============================
+from jax import numpy as jnp
+from grennen_specification import static_params, dynamic_params
+from nash.contract import find_equilibrium, best_response_map
 p_eq, info = find_equilibrium(static_params, dynamic_params)
-p_eqq = best_response_map(static_params, {**dynamic_params, "prices_i": p_eq})
-print(p_eq, p_eqq)
-print(p_eq - p_eqq)
+
+#update price
+dynamic_params["prices_i"] = p_eq
+best_response_to_peq = best_response_map(static_params, dynamic_params)
+print("Last two prices are")
+print(jnp.vstack((p_eq, best_response_to_peq)))
+print("Difference between equilibrium prices and best responses at equilibrium:")
+print(p_eq - best_response_to_peq)
 
 # i=0
 # calculate_nash_product(params, prices0, i)
