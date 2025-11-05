@@ -17,16 +17,14 @@ from src.nash.contract import (
     calculate_nash_product,
 )
 
-from src.nash.initializer import (
-    init_grennan_params,
-    init_simple_params,
-)
+from src.nash.initializer import init_simple_params
+from src.grennen_specification import static_params as grennan_static_params, dynamic_params as grennan_dynamic_params
 
 # -----------------------------------------------------------------------------
 # 1. Parameter initialization
 # -----------------------------------------------------------------------------
 def test_init_grennan_params_shapes():
-    static_params, dynamic_params = init_grennan_params(0)
+    static_params, dynamic_params = grennan_static_params, grennan_dynamic_params
     assert dynamic_params["hastype_i_t"].shape == (static_params["n_stents"], static_params["n_types"])
     assert dynamic_params["D_loyalty_i_l"].shape == (static_params["n_stents"], static_params["n_loyalty"])
     assert dynamic_params["D_denom_i_l"].shape == (static_params["n_stents"], static_params["n_loyalty"])
@@ -38,7 +36,7 @@ def test_init_grennan_params_shapes():
 # 2. Mean utilities δ_i
 # -----------------------------------------------------------------------------
 def test_compute_delta_linear_scaling():
-    static_params, dynamic_params = init_grennan_params(0)
+    static_params, dynamic_params = grennan_static_params, grennan_dynamic_params
     prices = jnp.linspace(1, 15, static_params["n_stents"])
     dynamic_params = {**dynamic_params, "prices_i": prices}
     δ = compute_δ_i(static_params, dynamic_params)
@@ -56,7 +54,7 @@ def test_compute_D_i_l_positive():
     Within each nest, D_i_l (without loyalty bonuses) should increase in δ_i.
     Loyalty terms may cause local rank reversals, so we check the base component only.
     """
-    static_params, dynamic_params = init_grennan_params(0)
+    static_params, dynamic_params = grennan_static_params, grennan_dynamic_params
     δ = jnp.linspace(-2, 0.5, static_params["n_stents"])
     D_i_l, S_t_l = compute_D_i_l(static_params, dynamic_params, δ)
 
@@ -85,7 +83,7 @@ def test_compute_D_i_l_positive():
 # 4. Conditional shares
 # -----------------------------------------------------------------------------
 def test_conditional_shares_sum_to_one():
-    static_params, dynamic_params = init_grennan_params(0)
+    static_params, dynamic_params = grennan_static_params, grennan_dynamic_params
     δ = jnp.linspace(-2, 0.5, static_params["n_stents"])
     D_i_l, S_t_l = compute_D_i_l(static_params, dynamic_params, δ)
 
@@ -106,7 +104,7 @@ def test_conditional_shares_sum_to_one():
 # 5. Full nested structure consistency
 # -----------------------------------------------------------------------------
 def test_total_share_consistency():
-    static_params, dynamic_params = init_grennan_params(0)
+    static_params, dynamic_params = grennan_static_params, grennan_dynamic_params
     δ = jnp.linspace(-2, 0.5, static_params["n_stents"])
     D_i_l, S_t_l = compute_D_i_l(static_params, dynamic_params, δ)
     s_i_l = compute_s_i_l(static_params, dynamic_params, D_i_l, S_t_l)
@@ -147,7 +145,7 @@ def test_gradients_are_finite():
     Verify that all core functions are differentiable w.r.t. prices,
     and that gradients are finite and nonzero.
     """
-    static_params, dynamic_params = init_grennan_params(0)
+    static_params, dynamic_params = grennan_static_params, grennan_dynamic_params
     prices = jnp.linspace(1, 15, static_params["n_stents"])
 
     # 1. δ_i wrt prices
@@ -189,7 +187,7 @@ def test_compute_hospital_profit_basic():
     """
     Hospital profit should be positive and decrease with higher prices.
     """
-    static_params, dynamic_params = init_grennan_params(0)
+    static_params, dynamic_params = grennan_static_params, grennan_dynamic_params
     prices_low = jnp.linspace(1, 8, static_params["n_stents"])
     prices_high = jnp.linspace(10, 18, static_params["n_stents"])
 
@@ -206,7 +204,7 @@ def test_compute_hospital_profit_exclusion():
     """
     Excluding a product (disagreement) should weakly lower hospital profit.
     """
-    static_params, dynamic_params = init_grennan_params(0)
+    static_params, dynamic_params = grennan_static_params, grennan_dynamic_params
     prices = jnp.linspace(5, 15, static_params["n_stents"])
     dynamic_params_prices = {**dynamic_params, "prices_i": prices}
     Π_full = compute_hospital_profit(static_params, dynamic_params_prices)
@@ -219,7 +217,7 @@ def test_compute_supplier_profit_markup_logic():
     Supplier profit = (p_i − c_i) * s_i(prices).
     Must be positive when price > cost and zero if excluded=True.
     """
-    static_params, dynamic_params = init_grennan_params(0)
+    static_params, dynamic_params = grennan_static_params, grennan_dynamic_params
     prices = jnp.linspace(5, 15, static_params["n_stents"])
     dynamic_params_prices = {**dynamic_params, "prices_i": prices}
 
@@ -238,7 +236,7 @@ def test_nash_product_positive_and_finite():
     """
     Nash product must be positive and finite, since we clamp with 1e−10 floors.
     """
-    static_params, dynamic_params = init_grennan_params(0)
+    static_params, dynamic_params = grennan_static_params, grennan_dynamic_params
     prices = jnp.linspace(5, 15, static_params["n_stents"])
     dynamic_params_prices = {**dynamic_params, "prices_i": prices}
     i = 3
@@ -252,7 +250,7 @@ def test_nash_product_reduces_with_high_prices():
     At very high prices, the log Nash product may be negative (product < 1)
     as gains from trade diminish.
     """
-    static_params, dynamic_params = init_grennan_params(0)
+    static_params, dynamic_params = grennan_static_params, grennan_dynamic_params
     prices_low = jnp.linspace(2, 8, static_params["n_stents"])
     prices_high = jnp.linspace(10, 16, static_params["n_stents"])
     i = 5
@@ -275,7 +273,7 @@ def test_grad_nash_product_wrt_prices():
     Ensure calculate_nash_product(params, prices, i) is JAX-differentiable
     w.r.t. prices, for use in implicit differentiation of equilibrium.
     """
-    static_params, dynamic_params = init_grennan_params(0)
+    static_params, dynamic_params = grennan_static_params, grennan_dynamic_params
     prices = jnp.linspace(5, 15, static_params["n_stents"])
     i = 4
 
