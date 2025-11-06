@@ -13,6 +13,7 @@ setup(
         "optax==0.2.6",
         "flax==0.12.0",
         "rich==14.2.0",
+        "joblib==1.5.2",
     ],
     extras_require={
         "test": [

@@ -10,9 +10,8 @@ def test_best_response_modes():
     modes = ["symmetric", "asymmetric", "high_loyalty", "high_elasticity"]
     for mode in modes:
         print(f"\n=== Testing mode: {mode} ===")
-        static_params, dynamic_params = init_simple_params(mode)
-        prices0 = (dynamic_params["lower_bounds_i"] + dynamic_params["upper_bounds_i"]) / 2
-        best_prices = best_response_map(static_params, dynamic_params)
+        static_params, dynamic_params, prices0 = init_simple_params(mode)
+        best_prices = best_response_map(static_params, dynamic_params, prices0)
 
         print("Initial prices:", prices0)
         print("Best responses:", best_prices)

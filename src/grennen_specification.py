@@ -1,13 +1,23 @@
 import jax
 from jax import numpy as jnp
+from jax import random
 from flax.core import FrozenDict
-from numpy import random as rng
+
+# Set random seed for reproducibility
+rng_key = random.PRNGKey(42)
+
 # ===============================================================
 # --- optimization params ---
 # ===============================================================
-lr=1e-2
-max_iter=5000
-tol=1e-6
+optimizer_params = {
+        "learning_rate": 5e-2,    # Step size (back to reasonable value)
+        "b1": 0.8,                # Momentum decay (1st moment)
+        "b2": 0.99,               # Curvature decay (2nd moment)
+        "eps": 1e-8               # Numerical stability
+        }
+max_iter=2000  # Keep increased iterations
+tol_inf=1e-5
+tol_l2=1e-8
 refresh_rate=10
 
 # ===============================================================
@@ -47,10 +57,12 @@ marginal_costs_i = marginal_cost_bms * is_bms + marginal_cost_des * is_des
 hospital_revenues_i = revenue_bms * is_bms + revenue_des * is_des
 
 # Bargaining parameters (mean=0.33, sd=0.07, clipped [0.01,0.99])
-bp_i = jnp.clip(jnp.array(rng.normal(0.33, 0.07, n_stents)), 0.01, 0.99)  # (I,)
+rng_key, subkey = random.split(rng_key)
+bp_i = jnp.clip(random.normal(subkey, shape=(n_stents,)) * 0.07 + 0.33, 0.01, 0.99)  # (I,)
 
 # Product fixed effects (taste shocks)
-θ_i = jnp.array(rng.uniform(-0.1, 0.1, n_stents))  # (I,) # in utilities
+rng_key, subkey = random.split(rng_key)
+θ_i = random.uniform(subkey, shape=(n_stents,), minval=-0.1, maxval=0.1)  # (I,) # in utilities
 
 # ===============================================================
 # --- Loyalty structure ---
@@ -93,10 +105,11 @@ D_denom_i_l = jnp.repeat(nest_scale_i[:, None], n_stents, axis=1)      # (I, L)
 # ---Putting things together---
 # ===============================================================
 meta_params = dict(
-    lr=1e-2,
-    max_iter=5000,
-    tol=1e-6,
-    refresh_rate=10,
+    max_iter=max_iter,
+    tol_inf=tol_inf,
+    tol_l2=tol_l2,
+    refresh_rate=refresh_rate,
+    optimizer_params=optimizer_params,
 )
 
 static_params = dict(
@@ -142,5 +155,7 @@ dynamic_params = dict(
     lower_bounds_i=lower_bounds_i,   # (I,)
     upper_bounds_i=upper_bounds_i,   # (I,)
     price_grids_i=price_grids_i,     # (I, n_grid)
-    prices_i=prices0_i,                # (I,) - current/initial prices
 )
+
+# Initial prices exported separately
+prices0_i = prices0_i  # (I,) - initial prices for equilibrium solver

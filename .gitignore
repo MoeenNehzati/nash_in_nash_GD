@@ -45,7 +45,7 @@ __pypackages__/
 # Environment files
 .env
 .env.*
-
+outputs/
 # Jupyter
 .ipynb_checkpoints
 

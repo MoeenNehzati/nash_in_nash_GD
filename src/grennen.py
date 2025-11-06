@@ -20,18 +20,30 @@ os.environ["JAX_ENABLE_X64"] = "0"  # float32 mode for speed
 # Main script to run the Grennan (2013) stent market equilibrium
 #===============================
 from jax import numpy as jnp
-from grennen_specification import static_params, dynamic_params
-from nash.contract import find_equilibrium, best_response_map
-p_eq, info = find_equilibrium(static_params, dynamic_params)
+from grennen_specification import static_params, dynamic_params, prices0_i
+from nash.contract import find_equilibrium, best_response_map, residual
+from jax import jacrev
 
-#update price
-dynamic_params["prices_i"] = p_eq
-best_response_to_peq = best_response_map(static_params, dynamic_params)
-print("Last two prices are")
-print(jnp.vstack((p_eq, best_response_to_peq)))
+p_eq, info = find_equilibrium(static_params, dynamic_params, prices0_i)
+
+# Calculate best response at equilibrium
+br_residual = lambda p: residual(static_params, dynamic_params, p)
+p_eq_br = best_response_map(static_params, dynamic_params, p_eq)
+J = jacrev(br_residual)(p_eq)
+detJ = jnp.linalg.det(J)
+sign, logabs = jnp.linalg.slogdet(J)
+
+print("Determinant of Jacobian of r(p) = br(p)-p at p_eq:", detJ)
+print("slogdet (sign, logabs):", sign, logabs)
+print("If p is the equilibrium and br(p) the best response")
+print("[p, br(p)] is")
+print(jnp.vstack((p_eq, p_eq_br)).T)
 print("Difference between equilibrium prices and best responses at equilibrium:")
-print(p_eq - best_response_to_peq)
+print((p_eq - p_eq_br).T)
 
 # i=0
 # calculate_nash_product(params, prices0, i)
 # print(jacobian(lambda p:calculate_nash_product(params,p,i))(prices0))
+
+#get the sign of jacobian
+#pagas proof

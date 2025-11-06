@@ -38,8 +38,7 @@ def test_init_grennan_params_shapes():
 def test_compute_delta_linear_scaling():
     static_params, dynamic_params = grennan_static_params, grennan_dynamic_params
     prices = jnp.linspace(1, 15, static_params["n_stents"])
-    dynamic_params = {**dynamic_params, "prices_i": prices}
-    δ = compute_δ_i(static_params, dynamic_params)
+    δ = compute_δ_i(static_params, dynamic_params, prices)
     # linear response: higher prices → lower δ
     assert δ.shape == (static_params["n_stents"],)
     assert δ[0] > δ[-1]
@@ -150,14 +149,14 @@ def test_gradients_are_finite():
 
     # 1. δ_i wrt prices
     def delta_fn(p):
-        return compute_δ_i(static_params, {**dynamic_params, "prices_i": p}).sum()
+        return compute_δ_i(static_params, dynamic_params, p).sum()
     grad_δ = jax.grad(delta_fn)(prices)
     assert jnp.all(jnp.isfinite(grad_δ)), "NaN in ∂δ/∂p"
     assert jnp.any(jnp.abs(grad_δ) > 1e-12), "zero gradient in ∂δ/∂p"
 
     # 2. D_i_l wrt prices
     def D_sum(p):
-        δ = compute_δ_i(static_params, {**dynamic_params, "prices_i": p})
+        δ = compute_δ_i(static_params, dynamic_params, p)
         D_i_l, _ = compute_D_i_l(static_params, dynamic_params, δ)
         return D_i_l.sum()
 
@@ -168,7 +167,7 @@ def test_gradients_are_finite():
 
     # 3. Full nested share wrt prices
     def total_share_sum(p):
-        δ = compute_δ_i(static_params, {**dynamic_params, "prices_i": p})
+        δ = compute_δ_i(static_params, dynamic_params, p)
         D_i_l, S_t_l = compute_D_i_l(static_params, dynamic_params, δ)
         s_i_l = compute_s_i_l(static_params, dynamic_params, D_i_l, S_t_l)
         s_i = compute_market_shares(static_params, dynamic_params, s_i_l)
@@ -191,8 +190,8 @@ def test_compute_hospital_profit_basic():
     prices_low = jnp.linspace(1, 8, static_params["n_stents"])
     prices_high = jnp.linspace(10, 18, static_params["n_stents"])
 
-    Π_low = compute_hospital_profit(static_params, {**dynamic_params, "prices_i": prices_low})
-    Π_high = compute_hospital_profit(static_params, {**dynamic_params, "prices_i": prices_high})
+    Π_low = compute_hospital_profit(static_params, dynamic_params, prices_low)
+    Π_high = compute_hospital_profit(static_params, dynamic_params, prices_high)
 
     assert Π_low > 0
     assert Π_high > 0
@@ -206,9 +205,8 @@ def test_compute_hospital_profit_exclusion():
     """
     static_params, dynamic_params = grennan_static_params, grennan_dynamic_params
     prices = jnp.linspace(5, 15, static_params["n_stents"])
-    dynamic_params_prices = {**dynamic_params, "prices_i": prices}
-    Π_full = compute_hospital_profit(static_params, dynamic_params_prices)
-    Π_excl = compute_hospital_profit(static_params, dynamic_params_prices, excluded_stent=0)
+    Π_full = compute_hospital_profit(static_params, dynamic_params, prices)
+    Π_excl = compute_hospital_profit(static_params, dynamic_params, prices, excluded_stent=0)
     assert Π_excl <= Π_full + 1e-8
 
 
@@ -219,11 +217,10 @@ def test_compute_supplier_profit_markup_logic():
     """
     static_params, dynamic_params = grennan_static_params, grennan_dynamic_params
     prices = jnp.linspace(5, 15, static_params["n_stents"])
-    dynamic_params_prices = {**dynamic_params, "prices_i": prices}
 
     i = 2
-    Π_on = compute_supplier_profit(static_params, dynamic_params_prices, i)
-    Π_off = compute_supplier_profit(static_params, dynamic_params_prices, i, excluded=True)
+    Π_on = compute_supplier_profit(static_params, dynamic_params, prices, i)
+    Π_off = compute_supplier_profit(static_params, dynamic_params, prices, i, excluded=True)
 
     assert jnp.isclose(Π_off, 0.0)
     assert Π_on > 0
@@ -238,9 +235,8 @@ def test_nash_product_positive_and_finite():
     """
     static_params, dynamic_params = grennan_static_params, grennan_dynamic_params
     prices = jnp.linspace(5, 15, static_params["n_stents"])
-    dynamic_params_prices = {**dynamic_params, "prices_i": prices}
     i = 3
-    N_i = calculate_nash_product(static_params, dynamic_params_prices, i)
+    N_i = calculate_nash_product(static_params, dynamic_params, prices, i)
     assert jnp.isfinite(N_i)
     assert N_i > 0
 
@@ -255,8 +251,8 @@ def test_nash_product_reduces_with_high_prices():
     prices_high = jnp.linspace(10, 16, static_params["n_stents"])
     i = 5
 
-    N_low = calculate_nash_product(static_params, {**dynamic_params, "prices_i": prices_low}, i)
-    N_high = calculate_nash_product(static_params, {**dynamic_params, "prices_i": prices_high}, i)
+    N_low = calculate_nash_product(static_params, dynamic_params, prices_low, i)
+    N_high = calculate_nash_product(static_params, dynamic_params, prices_high, i)
 
     # Both should be finite (this is log Nash product, so can be negative)
     assert jnp.isfinite(N_low) and jnp.isfinite(N_high)
@@ -277,7 +273,7 @@ def test_grad_nash_product_wrt_prices():
     prices = jnp.linspace(5, 15, static_params["n_stents"])
     i = 4
 
-    grad_fn = jax.grad(lambda p: calculate_nash_product(static_params, {**dynamic_params, "prices_i": p}, i).sum())
+    grad_fn = jax.grad(lambda p: calculate_nash_product(static_params, dynamic_params, p, i).sum())
     g = grad_fn(prices)
 
     assert g.shape == prices.shape

@@ -3,11 +3,19 @@ import numpy as np
 jnp = jax.numpy
 from flax.core import FrozenDict
 
+# Optimizer and solver meta-parameters (aligned with grennen_specification)
+optimizer_params = {
+    "learning_rate": 5e-2,
+    "b1": 0.8,
+    "b2": 0.99,
+    "eps": 1e-8,
+}
 meta_params = dict(
-        lr=1e-2,
-        max_iter=5000,
-        tol=1e-6,
-        refresh_rate=1
+    optimizer_params=optimizer_params,
+    max_iter=2000,
+    tol_inf=1e-5,
+    tol_l2=1e-8,
+    refresh_rate=10,
 )
 
 #todo add the change this step to the bar
@@ -61,6 +69,9 @@ def init_simple_params(mode="symmetric"):
     static_params =  dict(
         n_stents = n_stents,
         n_grid = 1000,
+        # Provide defaults for counts to mirror full spec (not strictly required here)
+        n_types = n_stents,
+        n_loyalty = n_stents,
     )
     static_params.update(meta_params)
     
@@ -78,7 +89,6 @@ def init_simple_params(mode="symmetric"):
         lower_bounds_i=lower_bounds_i,
         upper_bounds_i=upper_bounds_i,
         price_grids_i=price_grids_i,
-        prices_i=prices_i,
         marginal_costs_i=marginal_costs_i,
         hospital_revenues_i=hospital_revenues_i,
         θ_i=θ_i,
@@ -92,4 +102,4 @@ def init_simple_params(mode="symmetric"):
         φ_l=jnp.array([0.5, 0.5]),
         hastype_i_t=jnp.eye(n_stents),
     )
-    return FrozenDict(static_params), dynamic_params
+    return FrozenDict(static_params), dynamic_params, prices_i

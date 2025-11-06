@@ -104,8 +104,22 @@ from functools import partial
 import optax
 from rich.progress import Progress, TextColumn, BarColumn, TimeRemainingColumn, TimeElapsedColumn
 
+# Simple no-op progress object matching Rich's API used here
+class DummyProgress:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False  # don't suppress exceptions
+
+    def add_task(self, *args, **kwargs):
+        return 0
+
+    def update(self, *args, **kwargs):
+        pass
+
 @partial(jit, static_argnames=("static_params", "nash_objective_fn"))
-def argmax_f(static_params, dynamic_params, i, nash_objective_fn):
+def argmax_f(static_params, dynamic_params, prices_i: jnp.ndarray, i, nash_objective_fn):
     """
     Find the optimal price for product i using differentiable grid search.
     
@@ -118,12 +132,14 @@ def argmax_f(static_params, dynamic_params, i, nash_objective_fn):
     static_params : FrozenDict
         Static parameters (n_stents, n_grid, etc.)
     dynamic_params : dict
-        Dynamic parameters including price_grids_i and prices_i
+        Dynamic parameters including price_grids_i
+    prices_i : Array, shape (I,)
+        Current prices for all products
     i : int
         Index of product to optimize
     nash_objective_fn : callable
         Objective function to maximize (Nash bargaining product)
-        Should have signature: nash_objective_fn(static_params, dynamic_params, price_i, i)
+        Should have signature: nash_objective_fn(static_params, dynamic_params, prices_i, price_i, i)
         
     Returns
     -------
@@ -135,12 +151,12 @@ def argmax_f(static_params, dynamic_params, i, nash_objective_fn):
 
     # First-order condition: derivative of objective w.r.t. price
     def FOC(x):
-        return jax.grad(nash_objective_fn, argnums=2)(static_params, dynamic_params, x, i)
+        return jax.grad(nash_objective_fn, argnums=3)(static_params, dynamic_params, prices_i, x, i)
 
     # Forward pass: Grid search to find best price
     def solve(F, x0):
         # Evaluate objective at all grid points
-        vals = vmap(lambda x: nash_objective_fn(static_params, dynamic_params, x, i))(grid)
+        vals = vmap(lambda x: nash_objective_fn(static_params, dynamic_params, prices_i, x, i))(grid)
         # Return price with highest objective value
         x_star = grid[jnp.argmax(vals)]
         return x_star
@@ -160,7 +176,7 @@ def argmax_f(static_params, dynamic_params, i, nash_objective_fn):
 # Demand system primitives
 # ============================================================================
 
-def compute_δ_i(static_params, dynamic_params) -> jnp.ndarray:
+def compute_δ_i(static_params, dynamic_params, prices_i: jnp.ndarray) -> jnp.ndarray:
     """
     Compute mean utility for each product.
     
@@ -172,7 +188,9 @@ def compute_δ_i(static_params, dynamic_params) -> jnp.ndarray:
     static_params : FrozenDict
         Static parameters (unused here)
     dynamic_params : dict
-        Contains θ_i (base utility), θ_p (price coefficient), and prices_i (current prices)
+        Contains θ_i (base utility) and θ_p (price coefficient)
+    prices_i : Array, shape (I,)
+        Current prices for each product
         
     Returns
     -------
@@ -184,8 +202,7 @@ def compute_δ_i(static_params, dynamic_params) -> jnp.ndarray:
     θ_p is typically negative (higher price reduces utility)
     Prices are in $1000 units for numerical stability
     """
-    prices = dynamic_params["prices_i"]
-    return dynamic_params["θ_i"] + dynamic_params["θ_p"] * prices
+    return dynamic_params["θ_i"] + dynamic_params["θ_p"] * prices_i
 
 # ============================================================================
 # Nested logit demand system
@@ -487,7 +504,7 @@ def compute_market_shares(static_params, dynamic_params, s_i_l):
 # Main demand function
 # ============================================================================
 
-def compute_shares_from_prices(static_params, dynamic_params) -> jnp.ndarray:
+def compute_shares_from_prices(static_params, dynamic_params, prices_i: jnp.ndarray) -> jnp.ndarray:
     """
     Compute market shares from prices using nested logit demand system.
     
@@ -502,7 +519,9 @@ def compute_shares_from_prices(static_params, dynamic_params) -> jnp.ndarray:
     static_params : FrozenDict
         Static parameters (n_stents, etc.)
     dynamic_params : dict
-        All demand parameters (utilities, dissimilarities, loyalty, prices_i, etc.)
+        All demand parameters (utilities, dissimilarities, loyalty, etc.)
+    prices_i : Array, shape (I,)
+        Current prices for each product
         
     Returns
     -------
@@ -513,10 +532,9 @@ def compute_shares_from_prices(static_params, dynamic_params) -> jnp.ndarray:
     -----
     This function composes the full nested logit demand system.
     It's called repeatedly during equilibrium computation and profit calculations.
-    Prices are read from dynamic_params["prices_i"].
     """
     # Step 1: Compute mean utilities from prices
-    δ_i = compute_δ_i(static_params, dynamic_params)
+    δ_i = compute_δ_i(static_params, dynamic_params, prices_i)
     
     # Step 2: Compute exponentiated utilities and type-level aggregates
     D_i_l, S_t_l = compute_D_i_l(static_params, dynamic_params, δ_i)
@@ -533,7 +551,7 @@ def compute_shares_from_prices(static_params, dynamic_params) -> jnp.ndarray:
 # ============================================================================
 
 def compute_hospital_profit(
-    static_params, dynamic_params, excluded_stent: int | None = None
+    static_params, dynamic_params, prices_i: jnp.ndarray, excluded_stent: int | None = None
 ) -> jnp.ndarray:
     """
     Compute hospital profit from stent procedures.
@@ -548,7 +566,9 @@ def compute_hospital_profit(
     static_params : FrozenDict
         Static parameters
     dynamic_params : dict
-        Contains hospital_revenues_i (reimbursement per procedure) and prices_i (current prices)
+        Contains hospital_revenues_i (reimbursement per procedure)
+    prices_i : Array, shape (I,)
+        Current prices for each product
     excluded_stent : int or None
         If provided, simulates a disagreement scenario where this stent is
         unavailable. Its price is set prohibitively low and share forced to 0.
@@ -562,30 +582,26 @@ def compute_hospital_profit(
     -----
     When excluded_stent is used, this computes the hospital's disagreement payoff
     in bargaining - what they would earn if negotiations fail with that supplier.
-    This function temporarily modifies prices_i in dynamic_params for the excluded case.
     """
     if excluded_stent is not None:
-        # Save original prices and temporarily modify for disagreement scenario
-        original_prices = dynamic_params["prices_i"]
-        prices_mod = original_prices.at[excluded_stent].set(1e-10)
-        dynamic_params = {**dynamic_params, "prices_i": prices_mod}
-        shares = compute_shares_from_prices(static_params, dynamic_params)
+        # Temporarily modify prices for disagreement scenario
+        prices_mod = prices_i.at[excluded_stent].set(1e-10)
+        shares = compute_shares_from_prices(static_params, dynamic_params, prices_mod)
         shares = shares.at[excluded_stent].set(0.)
-        # Restore original prices
-        dynamic_params = {**dynamic_params, "prices_i": original_prices}
+        prices_used = prices_i  # Use original prices for profit calculation
     else:
-        shares = compute_shares_from_prices(static_params, dynamic_params)
+        shares = compute_shares_from_prices(static_params, dynamic_params, prices_i)
+        prices_used = prices_i
 
-    prices = dynamic_params["prices_i"]
     hospital_revenues = dynamic_params["hospital_revenues_i"]
-    return jnp.sum((hospital_revenues - prices) * shares)
+    return jnp.sum((hospital_revenues - prices_used) * shares)
 
 
 # -----------------------------------------------------------------------------
 # Supplier profit
 # -----------------------------------------------------------------------------
 def compute_supplier_profit(
-    static_params, dynamic_params, i: int, excluded: bool = False
+    static_params, dynamic_params, prices_i: jnp.ndarray, i: int, excluded: bool = False
 ) -> jnp.ndarray:
     """
     Compute profit for supplier i from selling stents.
@@ -599,7 +615,9 @@ def compute_supplier_profit(
     static_params : FrozenDict
         Static parameters
     dynamic_params : dict
-        Contains marginal_costs_i (production costs per stent) and prices_i (current prices)
+        Contains marginal_costs_i (production costs per stent)
+    prices_i : Array, shape (I,)
+        Current prices for each product
     i : int
         Index of the supplier whose profit to compute
     excluded : bool, default=False
@@ -618,9 +636,8 @@ def compute_supplier_profit(
     if excluded:
         return jnp.array(0, dtype=jnp.float64)
 
-    shares = compute_shares_from_prices(static_params, dynamic_params)
-    prices = dynamic_params["prices_i"]
-    markup = prices[i] - dynamic_params["marginal_costs_i"][i]
+    shares = compute_shares_from_prices(static_params, dynamic_params, prices_i)
+    markup = prices_i[i] - dynamic_params["marginal_costs_i"][i]
     return markup * shares[i]
 
 
@@ -628,7 +645,7 @@ def compute_supplier_profit(
 # Nash bargaining
 # ============================================================================
 
-def calculate_nash_product(static_params, dynamic_params, i: int) -> jnp.ndarray:
+def calculate_nash_product(static_params, dynamic_params, prices_i: jnp.ndarray, i: int) -> jnp.ndarray:
     """
     Compute Nash bargaining product for supplier i and the hospital.
     
@@ -649,7 +666,9 @@ def calculate_nash_product(static_params, dynamic_params, i: int) -> jnp.ndarray
     static_params : FrozenDict
         Static parameters
     dynamic_params : dict
-        Contains bp_i (bargaining power weights) and prices_i (current prices)
+        Contains bp_i (bargaining power weights)
+    prices_i : Array, shape (I,)
+        Current prices for each product
     i : int
         Index of the supplier bargaining with the hospital
         
@@ -666,13 +685,13 @@ def calculate_nash_product(static_params, dynamic_params, i: int) -> jnp.ndarray
     - The Nash solution maximizes this product
     """
     # Supplier side: profit with and without agreement
-    supplier_on = compute_supplier_profit(static_params, dynamic_params, i, excluded=False)
-    supplier_off = compute_supplier_profit(static_params, dynamic_params, i, excluded=True)
+    supplier_on = compute_supplier_profit(static_params, dynamic_params, prices_i, i, excluded=False)
+    supplier_off = compute_supplier_profit(static_params, dynamic_params, prices_i, i, excluded=True)
     supplier_gains = jnp.maximum(supplier_on - supplier_off, 1e-10)
 
     # Hospital side: profit with and without this supplier
-    hospital_on = compute_hospital_profit(static_params, dynamic_params, excluded_stent=None)
-    hospital_off = compute_hospital_profit(static_params, dynamic_params, excluded_stent=i)
+    hospital_on = compute_hospital_profit(static_params, dynamic_params, prices_i, excluded_stent=None)
+    hospital_off = compute_hospital_profit(static_params, dynamic_params, prices_i, excluded_stent=i)
     hospital_gains = jnp.maximum(hospital_on - hospital_off, 1e-10)
 
     # Combine using log for numerical stability
@@ -680,7 +699,7 @@ def calculate_nash_product(static_params, dynamic_params, i: int) -> jnp.ndarray
     log_nash = b_i * jnp.log(supplier_gains) + (1.0 - b_i) * jnp.log(hospital_gains)
     return log_nash
 
-def nash_objective(static_params, dynamic_params, price_i, i):
+def nash_objective(static_params, dynamic_params, prices_i: jnp.ndarray, price_i, i):
     """
     Objective function for Nash bargaining: log Nash product at given price.
     
@@ -692,7 +711,9 @@ def nash_objective(static_params, dynamic_params, price_i, i):
     static_params : FrozenDict
         Static parameters
     dynamic_params : dict
-        Model parameters (includes current prices_i)
+        Model parameters
+    prices_i : Array, shape (I,)
+        Current prices for all products
     price_i : scalar
         Candidate price for supplier i
     i : int
@@ -710,12 +731,11 @@ def nash_objective(static_params, dynamic_params, price_i, i):
     Temporarily updates prices_i[i] to evaluate objective at price_i.
     """
     # Temporarily update price for supplier i
-    prices_new = dynamic_params["prices_i"].at[i].set(price_i)
-    dynamic_params_new = {**dynamic_params, "prices_i": prices_new}
-    return calculate_nash_product(static_params, dynamic_params_new, i)
+    prices_new = prices_i.at[i].set(price_i)
+    return calculate_nash_product(static_params, dynamic_params, prices_new, i)
 
 @partial(jit, static_argnames="static_params")
-def best_response_map(static_params, dynamic_params):
+def best_response_map(static_params, dynamic_params, prices_i: jnp.ndarray):
     """
     Compute best response prices for all suppliers simultaneously.
     
@@ -732,7 +752,9 @@ def best_response_map(static_params, dynamic_params):
     static_params : FrozenDict
         Contains n_stents (number of products)
     dynamic_params : dict
-        All model parameters including prices_i (current prices)
+        All model parameters
+    prices_i : Array, shape (I,)
+        Current prices for all products
         
     Returns
     -------
@@ -748,9 +770,12 @@ def best_response_map(static_params, dynamic_params):
     """
     I = static_params["n_stents"]
     indices = jnp.arange(I)
-    return vmap(argmax_f, in_axes=(None, None, 0, None))(
-        static_params, dynamic_params, indices, nash_objective
+    return vmap(argmax_f, in_axes=(None, None, None, 0, None))(
+        static_params, dynamic_params, prices_i, indices, nash_objective
     )
+
+def residual(static_params, dynamic_params, prices_i):
+    return best_response_map(static_params, dynamic_params, prices_i) - prices_i
 
 def loss_fn(static_params, dynamic_params, prices_i):
     """
@@ -767,7 +792,9 @@ def loss_fn(static_params, dynamic_params, prices_i):
     static_params : FrozenDict
         Static parameters
     dynamic_params : dict
-        Model parameters including prices_i (current candidate prices)
+        Model parameters
+    prices_i : Array, shape (I,)
+        Current candidate prices
         
     Returns
     -------
@@ -779,13 +806,29 @@ def loss_fn(static_params, dynamic_params, prices_i):
     Minimizing this loss function finds the Nash equilibrium.
     Gradient descent on L(p) converges to a fixed point of BR(·).
     """
-    dynamic_params["prices_i"] = prices_i
-    r = best_response_map(static_params, dynamic_params) - prices_i
+    r = residual(static_params, dynamic_params, prices_i)
     return jnp.sum(r ** 2)
 
-# Precompile loss and gradient for efficiency
-loss_and_grad_fn = jit(
-    value_and_grad(loss_fn, argnums=2),
+# Precompile loss, gradient, and residual norms for efficiency
+def loss_with_aux(static_params, dynamic_params, prices_i):
+    """
+    Compute squared 2-norm loss and auxiliary residual norms.
+
+    Returns
+    -------
+    loss : scalar
+        ||r||_2^2 where r = BR(p) - p
+    aux : (r_inf, r_l2)
+        r_inf = ||r||_inf, r_l2 = ||r||_2
+    """
+    r = residual(static_params, dynamic_params, prices_i)
+    loss = jnp.sum(r ** 2)
+    r_inf = jnp.max(jnp.abs(r))
+    r_l2 = jnp.sqrt(loss)
+    return loss, (r_inf, r_l2)
+
+loss_grad_with_aux = jit(
+    value_and_grad(loss_with_aux, argnums=2, has_aux=True),
     static_argnames=("static_params",)
 )
 
@@ -794,83 +837,121 @@ loss_and_grad_fn = jit(
 # Nash equilibrium solver
 # ============================================================================
 
-def find_equilibrium(static_params, dynamic_params):
-    """
-    Find Nash-in-Nash equilibrium prices using gradient descent.
-    
-    Solves for equilibrium prices by minimizing the fixed-point residual:
-        min_p  L(p) = || BR(p) - p ||²
-    
-    where BR(p) is the best response mapping. At equilibrium p*, we have
-    BR(p*) = p*, so L(p*) = 0.
-    
-    Uses Adam optimizer with live progress bar showing convergence.
-    
+def find_equilibrium(
+    static_params,
+    dynamic_params,
+    prices0_i: jnp.ndarray,
+    quiet: bool = False,
+):
+    """Find Nash-in-Nash equilibrium prices via gradient-based fixed-point search.
+
+    We seek prices p* satisfying the fixed-point condition BR(p*) = p*, where
+    BR(·) is the vector of best-response prices. We minimize the squared
+    residual L(p) = || BR(p) - p ||_2^2 using Adam with projection onto
+    feasible price bounds.
+
+    The solver uses the infinity norm as the convergence criterion:
+      ||r||_∞ ≤ tol_inf
+
+    A real-time Rich progress bar displays the current residual norms:
+      ‖r‖₂ (l2_loss column) and ‖r‖∞ (linf_loss column) every `refresh_rate` steps.
+
     Parameters
     ----------
     static_params : FrozenDict
-        Contains optimization settings:
-        - lr: learning rate (e.g., 0.01)
-        - max_iter: maximum iterations (e.g., 1000)
-        - tol: convergence tolerance (e.g., 1e-6)
-        - refresh_rate: progress bar update frequency
+        Must contain:
+          - optimizer_params: dict with Adam hyperparameters
+              {learning_rate, b1, b2, eps}
+          - max_iter       : int, maximum iterations
+          - tol_inf        : float, infinity-norm stopping threshold
+          - tol_l2         : float, 2-norm stopping threshold
+          - refresh_rate   : int, UI update interval (in iterations)
+          - n_stents       : int, problem dimension (used for shapes)
     dynamic_params : dict
-        All model parameters including prices_i (initial guess for equilibrium)
-        
+        Model primitives (bounds, costs, revenues, demand parameters, grids).
+    prices0_i : Array, shape (I,)
+        Initial price vector (e.g., midpoint of bounds).
+    quiet : bool, default False
+        If True, suppresses the visual progress bar (uses a dummy no-op).
+
     Returns
     -------
     p_eq : Array, shape (I,)
-        Equilibrium prices satisfying Nash-in-Nash fixed point
-    info : dict
-        Diagnostics with keys:
-        - 'loss': final residual norm
-        - 'n_iter': iterations to convergence
-        - 'history': array of loss values over iterations
-        
+        Estimated equilibrium prices.
+    info : dict with keys
+        - loss     : final squared residual (||r||_2^2)
+        - n_iter   : iterations executed
+        - history  : 1D array of loss values (per iteration)
+        - r_inf    : final infinity norm ||r||_∞
+        - r_l2     : final 2-norm ||r||_2
+        - tol_inf  : stopping threshold used for infinity norm
+        - tol_l2   : stopping threshold used for 2-norm
+
     Notes
     -----
-    Convergence is typically fast when:
-    - Initial guess is close to equilibrium (e.g., marginal costs)
-    - Learning rate is well-tuned (0.01-0.1 works well)
-    - Grid resolution n_grid is sufficient (1000 points recommended)
-    
-    Progress bar displays:
-    - Current iteration and maximum iterations
-    - Current loss value
-    - Elapsed and estimated remaining time
-    
-    The prices_i in dynamic_params serves as the initial guess.
+    - Residual r(p) is computed in a single JIT pass together with gradients.
+    - The displayed norms are derived directly from r, not back-propagated.
+    - For fp32 arithmetic, default tolerances (1e-5, 1e-8) are conservative.
+    - If convergence stalls near the bounds, consider relaxing tol_inf slightly.
     """
-    lr = static_params["lr"]
+    optimizer_params = static_params["optimizer_params"]
     max_iter = static_params["max_iter"]
-    tol = static_params["tol"]
     refresh_rate = static_params["refresh_rate"]
+    tol_inf = static_params["tol_inf"]
+    tol_l2 = static_params["tol_l2"]
+
     
-    p = dynamic_params["prices_i"]
-    opt = optax.adam(lr)
+    # Get price bounds for projection
+    lower_bounds = dynamic_params["lower_bounds_i"]
+    upper_bounds = dynamic_params["upper_bounds_i"]
+    
+    p = prices0_i
+    # Chain optimizer with bound projection
+    opt = optax.chain(
+        optax.adam(**optimizer_params),
+        optax.clip_by_global_norm(1.0),  # Prevent exploding gradients
+    )
     opt_state = opt.init(p)
     history = []
 
-    with Progress(
-        TextColumn("[bold blue]Finding equilibrium...[/bold blue]"),
-        BarColumn(),
-        TextColumn("[green]{task.completed}/{task.total}[/green] steps"),
-        TextColumn("loss={task.fields[loss]:.3e}"),
-        TimeElapsedColumn(),
-        TimeRemainingColumn(),
-    ) as progress:
-        task = progress.add_task("solve", total=max_iter, loss=float("inf"))
+    # Choose progress implementation (real Rich progress or dummy no-op)
+    progress_cm = (
+        DummyProgress()
+        if quiet
+        else Progress(
+            TextColumn("[bold blue]Finding equilibrium...[/bold blue]"),
+            BarColumn(),
+            TextColumn("[green]{task.completed}/{task.total}[/green] steps"),
+            TextColumn("‖r‖₂={task.fields[l2_loss]:.2e}"),
+            TextColumn("‖r‖∞={task.fields[linf_loss]:.2e}"),
+            TimeElapsedColumn(),
+            TimeRemainingColumn(),
+        )
+    )
 
+    # Use the progress context manager so the bar renders
+    with progress_cm as progress:
+        task = progress.add_task(
+            "solve",
+            total=max_iter,
+            l2_loss=float("inf"),
+            linf_loss=float("inf"),
+        )
+        loss_val = float("inf")
+        t = 0
         for t in range(max_iter):
-            # Compute loss and gradient
-            loss, grad_p = loss_and_grad_fn(static_params, dynamic_params, p)
-                        
+            # Compute loss, residual norms, and gradient in one compiled pass
+            (loss, (r_inf, r_l2)), grad_p = loss_grad_with_aux(static_params, dynamic_params, p)
+
             # Update prices using Adam
             updates, opt_state = opt.update(grad_p, opt_state)
             p = optax.apply_updates(p, updates)
-            
+
+            # Project prices back to valid bounds
+            p = jnp.clip(p, lower_bounds, upper_bounds)
+
             history.append(float(loss))
-            
+
             # Check for numerical issues (convert to Python float first)
             loss_val = float(loss)
             if jnp.isnan(loss_val) or jnp.isnan(p).any():
@@ -880,15 +961,23 @@ def find_equilibrium(static_params, dynamic_params):
                 print("Loss:", loss_val)
                 break
 
-            # Update progress bar
+            # Update progress display
             if t % refresh_rate == 0:
-                progress.update(task, completed=t + 1, loss=loss_val)
+                progress.update(task, completed=t + 1, l2_loss=float(r_l2), linf_loss=float(r_inf))
 
-            # Check convergence
-            if loss_val < tol:
-                progress.update(task, completed=t + 1, loss=loss_val)
+            # Convergence check: only r_inf must be within threshold
+            if r_inf <= tol_inf:
                 break
 
-        progress.update(task, completed=t + 1, loss=loss_val)
+        # Final update to mark completion
+        progress.update(task, completed=t + 1, l2_loss=float(r_l2), linf_loss=float(r_inf))
 
-    return p, {"loss": loss_val, "n_iter": t + 1, "history": jnp.array(history)}
+    return p, {
+        "loss": loss_val,
+        "n_iter": t + 1,
+        "history": jnp.array(history),
+        "r_inf": float(r_inf),
+        "r_l2": float(r_l2),
+        "tol_inf": float(tol_inf),
+        "tol_l2": float(tol_l2),
+    }
