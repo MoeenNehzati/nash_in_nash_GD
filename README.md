@@ -204,11 +204,14 @@ The module can be imported to load previously computed results without re-runnin
 ```python
 from src.grennen_reps import load_replication_results
 
-# Load most recent results
+# Load most recent results from default outputs/ directory
 config, data = load_replication_results()
 
+# Load from a custom directory (e.g., from Jupyter notebook in analysis/)
+config, data = load_replication_results(data_root="../outputs")
+
 # Or load specific file
-config, data = load_replication_results("outputs/grennen_reps_20251106_120000.npz")
+config, data = load_replication_results(filepath="outputs/grennen_reps_20251106_120000.npz")
 
 # Access results
 print(f"Loaded {config['n_replications']} replications")
@@ -216,6 +219,19 @@ print(f"Mean equilibrium: {data['mean_eq']}")
 print(f"All equilibria shape: {data['equilibria'].shape}")
 print(f"Convergence iterations: {data['iterations']}")
 ```
+
+### Analysis Tools
+
+#### `analysis/analysis.ipynb`
+
+Jupyter notebook for visualizing and analyzing replication test results:
+
+**Features:**
+- Loads replication results saved by `grennen_reps.py`
+- Computes L2 and L∞ distance metrics across replications
+- Generates histograms showing equilibrium variation
+- Provides statistical summaries of convergence quality
+- Visualizes the Pakes-McGuire uniqueness test results
 
 ## Dependencies
 
@@ -285,6 +301,8 @@ fornow/
 │       ├── __init__.py
 │       ├── contract.py            # Nested logit demand & Nash bargaining
 │       └── initializer.py         # Test parameter initialization
+├── analysis/
+│   └── analysis.ipynb             # Visualization of replication results
 ├── tests/
 │   ├── test_br.py                 # Best response tests
 │   └── test_contract.py           # Demand & bargaining tests
