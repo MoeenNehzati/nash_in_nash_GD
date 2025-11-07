@@ -49,14 +49,16 @@ import glob
 from nash.contract import find_equilibrium
 
 
-def load_replication_results(filepath: Optional[str] = None) -> Tuple[Dict, np.ndarray]:
+def load_replication_results(filepath: Optional[str] = None, data_root: str = "outputs") -> Tuple[Dict, np.ndarray]:
     """Load replication results from saved output files.
     
     Parameters
     ----------
     filepath : str, optional
         Path to the .npz file to load. If None, loads the most recent file
-        from the outputs/ directory.
+        from the data_root directory.
+    data_root : str, default="outputs"
+        Directory to search for output files when filepath is None.
     
     Returns
     -------
@@ -77,12 +79,15 @@ def load_replication_results(filepath: Optional[str] = None) -> Tuple[Dict, np.n
     >>> config, data = load_replication_results()
     >>> print(f"Loaded {config['n_replications']} replications")
     >>> print(f"Mean equilibrium: {data['mean_eq']}")
+    >>> 
+    >>> # Load from custom directory
+    >>> config, data = load_replication_results(data_root="../outputs")
     """
     if filepath is None:
-        # Find most recent file in outputs/ directory
-        npz_files = glob.glob("outputs/grennen_reps_*.npz")
+        # Find most recent file in data_root directory
+        npz_files = glob.glob(os.path.join(data_root, "grennen_reps_*.npz"))
         if not npz_files:
-            raise FileNotFoundError("No replication output files found in outputs/ directory")
+            raise FileNotFoundError(f"No replication output files found in {data_root}/ directory")
         filepath = max(npz_files, key=os.path.getctime)
         print(f"Loading most recent results: {filepath}")
     
