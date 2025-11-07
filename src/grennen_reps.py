@@ -8,7 +8,7 @@ import argparse
 parser = argparse.ArgumentParser(description="Grennan replications runner")
 parser.add_argument("--x64", action="store_true",
                     help="Enable 64-bit precision (default: 32-bit)")
-parser.add_argument("--tol-inf", type=float, default=None,
+parser.add_argument("--tol-inf", type=float, default=1e-5,
                     help="Override solver infinity-norm tolerance (tol_inf)")
 parser.add_argument("--tol-l2", type=float, default=None,
                     help="Override solver L2-norm tolerance (tol_l2)")
@@ -127,14 +127,10 @@ def run_replications():
     n_stents = static_params["n_stents"]
 
     # Optionally override solver tolerances (create a new FrozenDict)
-    static_params_local = static_params
-    if (args.tol_inf is not None) or (args.tol_l2 is not None):
-        sp = dict(static_params)
-        if args.tol_inf is not None:
-            sp["tol_inf"] = args.tol_inf
-        if args.tol_l2 is not None:
-            sp["tol_l2"] = args.tol_l2
-        static_params_local = FrozenDict(sp)
+    static_params_local = dict(static_params)
+    static_params_local["tol_inf"] = args.tol_inf
+    static_params_local["tol_l2"] = args.tol_l2
+    static_params_local = FrozenDict(static_params_local)
 
     # Storage for results
     equilibria = []
@@ -266,16 +262,16 @@ def run_replications():
 
     # Save configuration/specification metadata in JSON
     config = {
-        "n_replications": int(n_replications),
-        "seed": int(seed),
-        "tolerance": float(tolerance),
-        "n_jobs": int(n_jobs),
-        "n_stents": int(n_stents),
-        "optimizer_params": {k: float(v) for k, v in static_params_local["optimizer_params"].items()},
-        "max_iter": int(static_params_local["max_iter"]),
-        "tol_inf": float(static_params_local["tol_inf"]),
-        "tol_l2": float(static_params_local["tol_l2"]),
-        "refresh_rate": int(static_params_local["refresh_rate"]),
+        "n_replications": n_replications,
+        "seed": seed,
+        "tolerance": tolerance,
+        "n_jobs": n_jobs,
+        "n_stents": n_stents,
+        "optimizer_params": {k: v for k, v in static_params_local["optimizer_params"].items()},
+        "max_iter": static_params_local["max_iter"],
+        "tol_inf": static_params_local["tol_inf"],
+        "tol_l2": static_params_local["tol_l2"],
+        "refresh_rate": static_params_local["refresh_rate"],
         "jax_enable_x64": os.environ.get("JAX_ENABLE_X64"),
         "paths": {"npz": npz_path},
     }

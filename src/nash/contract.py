@@ -975,9 +975,9 @@ def find_equilibrium(
     return p, {
         "loss": loss_val,
         "n_iter": t + 1,
-        "history": jnp.array(history),
-        "r_inf": float(r_inf),
-        "r_l2": float(r_l2),
-        "tol_inf": float(tol_inf),
-        "tol_l2": float(tol_l2),
+        "history": history,
+        "r_inf": r_inf,
+        "r_l2": r_l2,
+        "tol_inf": tol_inf,
+        "tol_l2": tol_l2,
     }
